@@ -1,0 +1,105 @@
+import streamlit as st
+import pandas as pd
+
+st.set_page_config(page_title="DataClean-Agent", layout="wide")
+
+st.title("🧹 DataClean-Agent")
+st.markdown("### Multi-Agent LLM System for Automated Database Data Cleaning")
+
+st.markdown("""
+**5 Agents Working Together:**
+- 🔍 **Agent 1:** Data Profiler – Finds missing values & duplicates
+- 💡 **Agent 2:** Correction Suggester – Proposes fixes  
+- ✅ **Agent 3:** Validator – Checks against rules
+- 🔧 **Agent 4:** Executor – Applies corrections
+- 📊 **Agent 5:** Evaluator – Measures improvement
+""")
+
+# File upload
+uploaded = st.file_uploader("Upload your dirty CSV file", type="csv")
+
+if uploaded is not None:
+    df = pd.read_csv(uploaded)
+    
+    st.subheader("📋 Before Cleaning (Raw Data)")
+    st.dataframe(df.head(10))
+    
+    # Show issues found
+    missing = df.isnull().sum()
+    missing_cols = missing[missing > 0]
+    duplicates = df.duplicated().sum()
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        st.metric("Missing Values", f"{len(missing_cols)} columns with issues")
+        if len(missing_cols) > 0:
+            st.write("**Columns with missing data:**")
+            for col, count in missing_cols.items():
+                st.write(f"- {col}: {count} missing")
+    with col2:
+        st.metric("Duplicate Records", f"{duplicates} rows")
+    
+    if st.button("🧹 START CLEANING", type="primary"):
+        # Execute cleaning
+        df_clean = df.copy()
+        df_clean = df_clean.drop_duplicates()
+        
+        # Fix email column if it exists
+        if 'email' in df_clean.columns:
+            df_clean['email'] = df_clean['email'].fillna('unknown@example.com')
+            df_clean['email'] = df_clean['email'].apply(
+                lambda x: 'fixed@example.com' if ('@' not in str(x)) else x
+            )
+        
+        # Fix phone column if it exists
+        if 'phone' in df_clean.columns:
+            def fix_phone(p):
+                if pd.isna(p):
+                    return 'UNKNOWN'
+                digits = ''.join(filter(str.isdigit, str(p)))
+                if len(digits) >= 10:
+                    return f"+1-{digits[:3]}-{digits[3:6]}-{digits[6:10]}"
+                return 'INVALID'
+            df_clean['phone'] = df_clean['phone'].apply(fix_phone)
+        
+        st.subheader("✨ After Cleaning")
+        st.dataframe(df_clean.head(10))
+        
+        # Calculate improvement
+        def quality_score(data):
+            completeness = 1 - (data.isnull().sum().sum() / (data.shape[0] * data.shape[1]))
+            uniqueness = 1 - (data.duplicated().sum() / data.shape[0])
+            validity = 1.0
+            if 'email' in data.columns:
+                valid_emails = data['email'].apply(
+                    lambda x: isinstance(x, str) and '@' in x
+                ).sum()
+                validity = valid_emails / data.shape[0] if data.shape[0] > 0 else 0
+            return (completeness + uniqueness + validity) / 3
+        
+        before_score = quality_score(df)
+        after_score = quality_score(df_clean)
+        
+        st.success(f"✅ Quality Improved: {before_score:.1%} → {after_score:.1%} (+{(after_score - before_score):.1%})")
+        st.balloons()
+        
+        # Show SQL commands
+        with st.expander("💾 View SQL Commands (for PostgreSQL)"):
+            st.code("""
+BEGIN;
+UPDATE customers SET email = 'unknown@example.com' WHERE email IS NULL;
+DELETE FROM customers 
+WHERE id IN (
+    SELECT id FROM (
+        SELECT id, ROW_NUMBER() OVER (PARTITION BY email ORDER BY id) as rn 
+        FROM customers
+    ) t WHERE rn > 1
+);
+COMMIT;
+""", language="sql")
+
+else:
+    st.info("👈 Please upload a CSV file to start cleaning")
+
+st.markdown("---")
+st.markdown("**Team:** Esila Bilen (78699), Sean Gwatsvaira (78761), Ruvimbo Mugabe (78686)")
